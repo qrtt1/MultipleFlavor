@@ -40,10 +40,42 @@ dependencies {
     testCompile 'junit:junit:4.12'
 }
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
+
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+import com.android.build.gradle.AndroidConfig
 
 class ExtraTask extends RuleSource {
+
+    private static def findDefaultFlavors(FileTree fileTree, List validFlavors) {
+        Pattern pattern = Pattern.compile("file:.*/src/([^/]+)/java/(.*.java)" + '$')
+
+        def mainRecord = [:]
+        def flavorRecord = [] as Set
+
+        fileTree.each {
+            Matcher matcher = pattern.matcher(it.toURI().toString());
+            if (matcher.matches()) {
+                def flavor = matcher.group(1)
+                def file = matcher.group(2)
+                if(flavor == "main") {
+                    mainRecord[file] = it.absolutePath
+                }
+                if(validFlavors.contains(flavor)) {
+                    flavorRecord.add(file)
+                }
+
+            }
+        }
+
+        def defaults = [:]
+        flavorRecord.each {
+            defaults[it] = mainRecord[it]
+        }
+        return defaults
+
+    }
 
     private static def extractFlavorWithClass(File file) {
         Pattern pattern = Pattern.compile("file:.*/src/([^/]+)/java/(.*).java" + '$');
@@ -54,13 +86,22 @@ class ExtraTask extends RuleSource {
         return [:]
     }
 
-    @Mutate void patchSourceSet(ModelMap<Task> tasks) {
+    @Model
+    public AndroidConfig androidConfig(ExtensionContainer container) {
+        return container.getByType(AndroidConfig.class);
+
+    }
+
+    @Mutate void patchSourceSet(ModelMap<Task> tasks, AndroidConfig config) {
         tasks.each { 
 
             // only watching the android-java-compile task
             if (!it.class.name.contains("AndroidJavaCompile")) {
                 return 
             }
+
+            def validFlavors = config.productFlavors.collect { it.name }
+            def defaultFlavors = findDefaultFlavors(it.project.fileTree("src"), validFlavors)
 
             def excludes = []
             def record = [:]
@@ -88,8 +129,11 @@ class ExtraTask extends RuleSource {
                 }
             }
 
+
+            println excludes
             // patch the source-set of the compiler
             it.source = it.source.minus(it.project.files(excludes))
+
         }
     }
 }
